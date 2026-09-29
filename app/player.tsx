@@ -14,7 +14,34 @@ export default function Player() {
   const toggleEdit = () => { if (admin) setEditing(!editing); else setLogin(true) }
   const play = (track:Track) => { if (audio.current?.src === track.url && !audio.current.paused) { audio.current.pause(); return } audio.current?.pause(); const next = new Audio(track.url); audio.current = next; setActive(track.id); next.play(); next.onended = next.onpause = () => setActive(null) }
   const signIn = async (e:React.FormEvent) => { e.preventDefault(); const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})}); if(!r.ok){notify('Contraseña incorrecta.');return} setAdmin(true);setEditing(true);setLogin(false);setPassword('');notify('Modo edición activado.') }
-  const onUpload = async (e:ChangeEvent<HTMLInputElement>) => { const files=[...(e.target.files || [])]; for (const file of files) { const pathname=`sonora/audio/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'-')}`; const blob=await upload(pathname,file,{access:'public',handleUploadUrl:'/api/upload'}); const item={id:id(),title:file.name.replace(/\.[^/.]+$/,''),color:colors[tracks.length%colors.length],url:blob.url,pathname:blob.pathname}; const r=await fetch('/api/tracks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item)}); if(!r.ok){notify('La carga terminó, pero no se pudo guardar la pista.');await refresh();return} setTracks(v=>[...v,item]) } e.target.value=''; notify('Pista guardada en la nube.') }
+  const onUpload = async (e:ChangeEvent<HTMLInputElement>) => {
+    const files=[...(e.target.files || [])]
+    let ok=0
+    for (const file of files) {
+      try {
+        const pathname=`sonora/audio/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'-')}`
+        const blob=await upload(pathname,file,{
+          access:'public',
+          handleUploadUrl:'/api/upload',
+          contentType:file.type||'application/octet-stream'
+        })
+        const item={id:id(),title:file.name.replace(/\.[^/.]+$/,''),color:colors[tracks.length%colors.length],url:blob.url,pathname:blob.pathname}
+        const r=await fetch('/api/tracks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item)})
+        if(!r.ok){
+          const err=await r.json().catch(()=>({}))
+          notify(`No se pudo guardar "${file.name}": ${err.error||'error desconocido'}`)
+          continue
+        }
+        setTracks(v=>[...v,item])
+        ok++
+      } catch (err) {
+        console.error('Error al subir', file.name, err)
+        notify(`No se pudo subir "${file.name}": ${err instanceof Error ? err.message : 'error desconocido'}`)
+      }
+    }
+    e.target.value=''
+    if (ok>0) notify(ok===1?'Pista guardada en la nube.':`${ok} pistas guardadas en la nube.`)
+  }
   const remove = async (track:Track) => { if(!confirm(`¿Eliminar “${track.title}”?`)) return; const r=await fetch('/api/tracks',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:track.id})}); setTracks(await r.json()); setSelected(null); notify('Pista eliminada.') }
   const saveDetails = async (e:React.FormEvent) => { e.preventDefault(); if(!selected) return; const next=tracks.map(t=>t.id===selected.id?selected:t); await persist(next);setSelected(null);notify('Botón actualizado.') }
   const move = async (from:number, delta:number) => { const to=from+delta;if(to<0||to>=tracks.length)return;const next=[...tracks];[next[from],next[to]]=[next[to],next[from]];await persist(next) }

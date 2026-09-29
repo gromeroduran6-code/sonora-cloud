@@ -6,9 +6,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   try {
     const response = await handleUpload({ body, request, onBeforeGenerateToken: async (pathname) => ({
-      allowedContentTypes:['audio/mpeg','audio/wav','audio/ogg','audio/mp4','audio/x-m4a','audio/aac'], maximumPayloadSizeInBytes: 1024 * 1024 * 500,
+      allowedContentTypes:['audio/mpeg','audio/mp3','audio/wav','audio/x-wav','audio/wave','audio/ogg','audio/mp4','audio/x-m4a','audio/aac','audio/flac','audio/x-flac','audio/webm','audio/3gpp','audio/octet-stream'], maximumPayloadSizeInBytes: 1024 * 1024 * 500,
       addRandomSuffix:true, tokenPayload: JSON.stringify({ pathname })
     }), onUploadCompleted: async () => {} })
     return NextResponse.json(response)
-  } catch { return NextResponse.json({ error:'No se pudo preparar la carga.' }, { status:400 }) }
+  } catch (err) { console.error('Error preparando la carga:', err); return NextResponse.json({ error: err instanceof Error ? err.message : 'No se pudo preparar la carga.' }, { status:400 }) }
 }
