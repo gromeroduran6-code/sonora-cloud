@@ -10,5 +10,14 @@ export async function POST(request: NextRequest) {
       addRandomSuffix:true, tokenPayload: JSON.stringify({ pathname })
     }), onUploadCompleted: async () => {} })
     return NextResponse.json(response)
-  } catch (err) { console.error('Error preparando la carga:', err); return NextResponse.json({ error: err instanceof Error ? err.message : 'No se pudo preparar la carga.' }, { status:400 }) }
+  } catch (error) {
+  console.error('Blob handleUpload error:', error)
+
+  return NextResponse.json(
+    {
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    },
+    { status: 500 }
+  )
+}
 }
