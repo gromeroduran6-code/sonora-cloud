@@ -6,29 +6,39 @@ type Group = { id:string; title:string; color:string }
 type Selected = { kind:'track'; item:Track } | { kind:'group'; item:Group }
 const colors = ['#dffb73','#b8e3ff','#ffc5d7','#e7d5ff','#ffd890','#bdf4d6']
 const FADE_MS = 3000 // duración del fade out al pausar (mantener igual en .tile.fading de styles.css)
+const FADE_IN_MS = 1500 // fade in de cada pista y duración del fundido cruzado entre pistas
 const id = () => crypto.randomUUID()
 const textOn = (hex:string) => { const n=parseInt(hex.slice(1),16); return 0.299*(n>>16)+0.587*((n>>8)&255)+0.114*(n&255)>150 ? '#17191d' : '#ffffff' }
 export default function Player() {
   const [tracks, setTracks] = useState<Track[]>([]), [groups, setGroups] = useState<Group[]>([]), [admin, setAdmin] = useState(false), [editing, setEditing] = useState(false), [login, setLogin] = useState(false), [password, setPassword] = useState(''), [message, setMessage] = useState(''), [active, setActive] = useState<string | null>(null), [fading, setFading] = useState(false), [selected, setSelected] = useState<Selected | null>(null), [openGroup, setOpenGroup] = useState<string | null>(null)
-  const audio = useRef<HTMLAudioElement | null>(null), fadeTimer = useRef<number | null>(null)
+  const audio = useRef<HTMLAudioElement | null>(null), ramps = useRef(new Map<HTMLAudioElement, number>())
   const notify = (text:string) => { setMessage(text); window.setTimeout(()=>setMessage(''), 2600) }
   const applyLibrary = (lib:{tracks?:Track[]; groups?:Group[]}) => { setTracks(lib.tracks || []); setGroups(lib.groups || []) }
   const refresh = async () => { const [t,a] = await Promise.all([fetch('/api/tracks',{cache:'no-store'}),fetch('/api/auth')]); applyLibrary(await t.json()); setAdmin((await a.json()).authenticated) }
   useEffect(() => { refresh() }, [])
   const persist = async (nextTracks:Track[], nextGroups:Group[]) => { setTracks(nextTracks); setGroups(nextGroups); await fetch('/api/tracks',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({tracks:nextTracks,groups:nextGroups})}) }
   const toggleEdit = () => { if (admin) setEditing(!editing); else setLogin(true) }
-  const stopFade = () => { if (fadeTimer.current) { window.clearInterval(fadeTimer.current); fadeTimer.current = null } setFading(false) }
-  const fadeOut = (a:HTMLAudioElement) => {
-    stopFade(); const from=a.volume, start=Date.now(); setFading(true)
-    fadeTimer.current = window.setInterval(() => { const t=Math.min((Date.now()-start)/FADE_MS,1); a.volume=from*(1-t)*(1-t); if (t>=1) { stopFade(); a.pause(); a.volume=1 } }, 50)
+  const cancelRamp = (a:HTMLAudioElement) => { const t=ramps.current.get(a); if (t!==undefined) { window.clearInterval(t); ramps.current.delete(a) } }
+  const ramp = (a:HTMLAudioElement, to:0|1, ms:number, done?:()=>void) => { // sube o baja el volumen de forma suave (curva de potencia constante)
+    cancelRamp(a); const from=a.volume, start=Date.now()
+    const timer=window.setInterval(() => { const t=Math.min((Date.now()-start)/ms,1), p=t*Math.PI/2; a.volume=Math.min(1,Math.max(0, to===1 ? from+(1-from)*Math.sin(p) : from*Math.cos(p))); if (t>=1) { cancelRamp(a); done?.() } }, 50)
+    ramps.current.set(a,timer)
   }
+  const stopFade = () => { if (audio.current) cancelRamp(audio.current); setFading(false) }
   const play = (track:Track) => {
     const current = audio.current
-    if (current && active===track.id && !current.paused) { if (fading) { stopFade(); current.volume=1; return } fadeOut(current); return }
-    stopFade(); if (current) { current.onpause=null; current.onended=null; current.pause() }
-    const next = new Audio(track.url); audio.current = next; setActive(track.id)
+    if (current && active===track.id && !current.paused) {
+      if (fading) { setFading(false); ramp(current,1,FADE_IN_MS); return } // tocar durante el fade out lo cancela
+      setFading(true); ramp(current,0,FADE_MS,() => { setFading(false); current.pause(); current.volume=1 }); return
+    }
+    setFading(false)
+    const previous = current && !current.paused ? current : null // pista que aún suena: se funde con la nueva
+    if (current) { current.onpause=null; current.onended=null; if (!previous) { cancelRamp(current); current.pause() } }
+    const next = new Audio(track.url); next.volume=0; audio.current=next; setActive(track.id)
+    const crossfade = () => { if (previous) ramp(previous,0,FADE_IN_MS,() => previous.pause()) }
+    next.addEventListener('playing', () => { crossfade(); if (audio.current===next) ramp(next,1,FADE_IN_MS) }, { once:true })
     next.onended = next.onpause = () => { if (audio.current===next) setActive(null) }
-    next.play().catch(() => { if (audio.current===next) { setActive(null); notify('No se pudo reproducir la pista.') } })
+    next.play().catch(() => { crossfade(); if (audio.current===next) { setActive(null); notify('No se pudo reproducir la pista.') } })
   }
   const signIn = async (e:React.FormEvent) => { e.preventDefault(); const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})}); if(!r.ok){notify('Contraseña incorrecta.');return} setAdmin(true);setEditing(true);setLogin(false);setPassword('');notify('Modo edición activado.') }
   const currentGroup = groups.find(g=>g.id===openGroup) || null, gid = currentGroup ? currentGroup.id : null
